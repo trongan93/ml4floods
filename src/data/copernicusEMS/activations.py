@@ -461,6 +461,8 @@ def filter_register_copernicusems(
     area_of_interest_file = is_file_in_directory(unzipped_directory, "*_area*.shp")
     if not area_of_interest_file:
         return
+    
+    print(source_file)
 
     pd_source = load_source_file(source_file)
     if pd_source is None:
@@ -791,3 +793,233 @@ def get_bbox(pd_geo: gpd.GeoDataFrame) -> Dict:
 
 
 COPY_FORMATS = ["dbf", "prj", "shp", "shx"]
+
+def filter_register_copernicusems_dev(
+    unzipped_directory: str, code_date: str, verbose: bool = False
+) -> Optional[Dict]:
+    """
+    Function that collects the following files from the unzipped directories for each Copernicus EMS
+    activation code and stores them into a dictionary with additional metadata with respect to the source.
+    The files of interest are the shapefiles and associated supporting files for the:
+
+      1. area of interest
+      2. hydrography
+      3. observed event
+
+    Args:
+      unzipped_directory (str): The name of the directory where the extracted EMS files live
+      code_date (str): string representation of the EMSR Activation code date of issuance.
+      verbose (bool): boolean flag to monitor the difference in pre-event and post-event dates.
+
+    Returns:
+      A dictionary with the keys 'name', 'ems_code', 'timestamp', 'satellite', 'area_of_interest'
+      'timestamp_ems_code', 'observed_event_file', 'area_of_interest_file.'
+      None if there are inconsistencies in the metadata
+
+    """
+    
+    
+    # Fetch source files needed to generate floodmap - source, observed event, area of interest
+#     source_file = is_file_in_directory(unzipped_directory, "*_source*.dbf")
+#     if not source_file:
+#         return
+
+#     observed_event_file = is_file_in_directory(unzipped_directory, "*_observed*.shp")
+#     if not observed_event_file:
+#         return
+
+#     area_of_interest_file = is_file_in_directory(unzipped_directory, "*_area*.shp")
+#     if not area_of_interest_file:
+#         return
+
+    source_file = is_keyword_file_in_aoi_dir(unzipped_directory, "source")
+    if not source_file:
+        return
+
+    observed_event_file = is_keyword_file_in_aoi_dir(unzipped_directory, "observed")
+    if not observed_event_file:
+        return
+
+    area_of_interest_file = is_keyword_file_in_aoi_dir(unzipped_directory, "area")
+    if not area_of_interest_file:
+        return
+
+    pd_source = load_source_file(source_file)
+    if pd_source is None:
+        return
+
+# check if the aoi_dir contains the 4 files we need based on name
+
+##FIXXMEEEEEE
+#     bucket_gcp, filepath_gcp, filename_gcp = parse_gcp_path(unzipped_directory)
+#     check_file_in_bucket_exists(bucket_gcp, )
+# ############
+    product_name = os.path.basename(os.path.dirname(source_file))
+    ems_code = product_name.split("_")[0]
+
+    date_post_event = min(pd_source[pd_source.eventphase == "Post-event"]["date"])
+    max_date_post_event = max(pd_source[pd_source.eventphase == "Post-event"]["date"])
+    satellite_post_event = np.array(
+        pd_source[
+            (pd_source.eventphase == "Post-event") & (pd_source.date == date_post_event)
+        ]["source_nam"]
+    )[0]
+
+    date_ems_code = datetime.datetime.strptime(code_date, "%Y-%m-%d").replace(
+        tzinfo=datetime.timezone.utc
+    )
+
+    if not post_event_date_difference_is_ok(
+        date_post_event, date_ems_code, max_date_post_event, verbose
+    ):
+        return
+
+    # Check if pre-event date precedes post-event date
+    content_pre_event = {}
+    if np.any(pd_source.eventphase == "Pre-event"):
+        date_pre_event = max(
+            np.array(pd_source[pd_source.eventphase == "Pre-event"]["date"])
+        )
+        satellite_pre_event = np.array(
+            pd_source[
+                (pd_source.eventphase == "Pre-event")
+                & (pd_source.date == date_pre_event)
+            ]["source_nam"]
+        )[0]
+
+        content_pre_event["satellite_pre_event"] = satellite_pre_event
+        content_pre_event["timestamp_pre_event"] = date_pre_event
+        if (date_post_event - date_pre_event).days < 0 and verbose:
+            print(
+                "Date pre event %s is after date post event %s"
+                % (
+                    date_pre_event.strftime("%Y-%m-%d"),
+                    date_post_event.strftime("%Y-%m-%d"),
+                )
+            )
+            return
+
+    # Filter content of shapefile
+    pd_geo = gpd.read_file(observed_event_file)
+    if np.any(pd_geo["event_type"] != "5-Flood") and verbose:
+        print(
+            f"{observed_event_file} Event type is not Flood {np.unique(pd_geo['event_type'])}"
+        )
+        return
+
+    if not all(
+        notation in ACCEPTED_FIELDS
+        for notation in pd_geo[COLUMN_W_CLASS_OBSERVED_EVENT]
+    ):
+        print(
+            f"There are unknown fields in the {COLUMN_W_CLASS_OBSERVED_EVENT} column of {observed_event_file}: {np.unique(pd_geo[COLUMN_W_CLASS_OBSERVED_EVENT])}"
+        )
+        return
+
+    if pd_geo.crs is None:
+        print(f"{observed_event_file} file is not georeferenced")
+        return
+
+    str_crs = str(pd_geo.crs).lower()
+
+    if not isinstance(satellite_post_event, str) and verbose:
+        print("Satellite post event: {} is not a string!".format(satellite_post_event))
+        return
+
+    if satellite_post_event in RENAME_SATELLITE:
+        satellite_post_event = RENAME_SATELLITE[satellite_post_event]
+
+    area_of_interest = gpd.read_file(area_of_interest_file)
+
+    if area_of_interest.crs is None:
+        print(f"{area_of_interest_file} file is not georeferenced")
+        return
+
+    area_of_interest_crs = str(area_of_interest.crs).lower()
+
+    if area_of_interest_crs != str_crs:
+        print(
+            f"{area_of_interest_file} and {observed_event_file} have different georreferencing"
+        )
+        return
+
+    if area_of_interest_crs != "epsg:4326":
+        area_of_interest.to_crs(crs="epsg:4326", inplace=True)
+
+    # Save pol of area of interest in epsg:4326 (lat/lng)
+    area_of_interest_pol = cascaded_union(area_of_interest["geometry"])
+
+    if "obj_desc" in pd_geo:
+        event_type = np.unique(pd_geo.obj_desc)
+        if len(event_type) > 1:
+            print("Multiple event types within shapefile {}".format(event_type))
+        event_type = event_type[0]
+    else:
+        event_type = "NaN"
+
+    crs_code_space, crs_code = str_crs.split(":")
+
+    register = {
+        "event id": product_name,
+        "layer name": os.path.basename(os.path.splitext(observed_event_file)[0]),
+        "event type": event_type,
+        "satellite date": date_post_event,
+        "country": "NaN",
+        "satellite": satellite_post_event,
+        "bounding box": get_bbox(pd_geo),
+        "reference system": {"code space": crs_code_space, "code": crs_code},
+        "abstract": "NaN",
+        "purpose": "NaN",
+        "source": "CopernicusEMS",
+        "area_of_interest_polygon": area_of_interest_pol,
+        # CopernicusEMS specific fields
+        "observed_event_file": os.path.basename(observed_event_file),
+        "area_of_interest_file": os.path.basename(area_of_interest_file),
+        "ems_code": ems_code,
+    }
+
+    register.update(content_pre_event)
+
+    name_possibilities = ["_hydrographyA_", "_hydrography_a"]
+    for name_pos in name_possibilities:
+        hydrology_file_as = glob(os.path.join(unzipped_directory, f"*{name_pos}*.shp"))
+        if len(hydrology_file_as) == 1:
+            if not _check_hydro_ok(hydrology_file_as[0], expected_crs=str_crs):
+                return
+            register["hydrology_file"] = os.path.basename(hydrology_file_as[0])
+
+    name_possibilities = ["_hydrographyL_", "_hydrography_l"]
+    for name_pos in name_possibilities:
+        hydrology_file_l = glob(os.path.join(unzipped_directory, f"*{name_pos}*.shp"))
+        if len(hydrology_file_l) == 1:
+            if not _check_hydro_ok(hydrology_file_l[0], expected_crs=str_crs):
+                return
+            register["hydrology_file_l"] = os.path.basename(hydrology_file_l[0])
+
+    return register
+
+def is_keyword_file_in_aoi_dir(aoi_i: str, keyword: str) -> str:
+    """
+    This function checks if source, observed event, hydrographyA, and hydrographyL exist
+    in the bucket for an AOI directory.
+    
+    Args:
+      aoi_i (str): string path-name including gs:// until parent AOI directory.
+      
+    Returns:
+      a blob.name string with the name of the file.
+    """
+    client = storage.Client()
+    bucket_name, filepath_wo_bucket = check_for_files_in_dir(aoi_i)
+    bucket = client.bucket(bucket_name)
+    for blob in bucket.list_blobs(prefix=filepath_wo_bucket):
+        if keyword in blob.name:
+            return blob.name
+    return None
+
+def check_for_files_in_dir(parent_directory: str):
+    parent_dir_no_gs = parent_directory.replace("gs://", "")
+    bucket_name = parent_dir_no_gs.split("/")[0]
+    filepath_wo_bucket = "/".join(parent_dir_no_gs.split("/")[1:])
+       
+    return bucket_name, filepath_wo_bucket
