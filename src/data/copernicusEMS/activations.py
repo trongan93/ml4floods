@@ -24,7 +24,7 @@ from zipfile import ZipFile, is_zipfile
 import tqdm
 
 from src.data import utils
-from src.data.copernicusEMS import utils
+#from src.data.copernicusEMS import utils
 
 
 def is_downloadable(url: str) -> bool:
