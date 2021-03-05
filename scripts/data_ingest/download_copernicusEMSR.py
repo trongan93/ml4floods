@@ -6,6 +6,7 @@ sys.path.append(str(here()))
 
 from google.cloud import storage
 from src.data.copernicusEMS import activations
+import pandas as pd
 
 # import importlib
 # importlib.reload(activations)
@@ -90,15 +91,25 @@ def extract_ems_zip_files_gcp(bucket_id: str, file_path_to_zip: str, file_path_t
                 blob_to_unzipped.upload_from_string(zipdict[name])
 
 
-
+def pandas_df_as_csv_gcp(df: pd.DataFrame, bucket_id: str, path_to_write_csv: str) -> None:
+    client = storage.Client()
+    f = StringIO()
+    df.to_csv(f)
+    f.seek(0)
+    client.get_bucket(bucket_id).blob(path_to_write_csv).upload_from_file(f, content_type='text/csv')
+                
+                
 def main():
     bucket_id = 'ml4cc_data_lake'
     path_to_write_zip = '0_DEV/0_Raw/WorldFloods/copernicus_ems/copernicus_ems_zip'
     path_to_write_unzip = '0_DEV/0_Raw/WorldFloods/copernicus_ems/copernicus_ems_unzip'
+    path_to_write_csv = '0_DEV/0_Raw/WorldFloods/copernicus_ems/copernicus_ems_codes/ems_activations_20150701_20210304'
+
     
     # fetch Copernicus EMSR codes from Copernicus EMS activations page
     # pandas DataFrame of activations table
     table_activations_ems = activations.table_floods_ems(event_start_date="2015-07-01")
+    pandas_df_as_csv_gcp(table_activations_ems, bucket_id, path_to_write_csv)
     
     # convert code index to a list
     emsr_codes = table_activations_ems.index.to_list()
