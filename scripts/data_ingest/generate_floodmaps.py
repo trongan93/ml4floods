@@ -44,21 +44,26 @@ def main():
     
     table_activations_ems = table_activations_ems[table_activations_ems['has_aoi'] == False]
     esmr_codes = list(table_activations_ems.index)
-    #esmr_codes = ['EMSR280']
+#     esmr_codes = ['EMSR249']
     
     unzipped_activations_parent_dir = "gs://ml4cc_data_lake/0_DEV/0_Raw/WorldFloods/copernicus_ems/copernicus_ems_unzip"
     data_store = "1_Staging"
     gcp_output_parent_dir = f"gs://ml4cc_data_lake/0_DEV/{data_store}/WorldFloods/"
 
     # ===== Generate and store registers per code ===========
-    with tqdm(esmr_codes[2:]) as pbar:
+    with tqdm(esmr_codes) as pbar:
         for activation in pbar:
+            print(activation)
             code_date = table_activations_ems.loc[activation]["CodeDate"]
             sample_activation_dir = os.path.join(unzipped_activations_parent_dir, activation)
+            print("sample_activation_dir", sample_activation_dir)
+            print("code_date", code_date)
             register_list = activations.filter_register_copernicusems_gcp(sample_activation_dir, code_date)
+            print(register_list)
 
             # ====== Create and save metadata_floodmap and floodmap per AOI =======
             for metadata_floodmap in register_list:
+                print(metadata_floodmap)
                 floodmap = activations.generate_floodmap_gcp(metadata_floodmap, folder_files=unzipped_activations_parent_dir)
 
                 # push metadata to bucket
