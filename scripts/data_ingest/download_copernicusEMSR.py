@@ -14,6 +14,7 @@ from io import BytesIO, StringIO
 from typing import Dict
 from zipfile import ZipFile, is_zipfile
 import tqdm
+import pandas as pd
 
 copernicus_ems_webscrape_data  = {"confirmation": 1,
                                   "op":  "Download file",
@@ -84,10 +85,12 @@ def extract_ems_zip_files_gcp(bucket_id: str, file_path_to_zip: str, file_path_t
     input_zip = ZipFile(f_from_gcp)
     if is_zipfile(f_from_gcp):
         for name in input_zip.namelist():
-            if 'areaOfInterestA' in name or 'hydrography' in name or 'observed' in name or 'source' in name:
-                zipdict[name] = input_zip.read(name)
+
+            if 'areaOfInterestA' in name or 'hydrography' in name or 'observed' in name or 'source' in name or 'area_of_interest_a' in name or 'area' in name.lower():
+
                 blob_to_unzipped = bucket.blob(file_path_to_unzip + "/" + name)
-                blob_to_unzipped.upload_from_string(zipdict[name])
+                zipdict[os.path.basename(name)] = input_zip.read(name)
+                blob_to_unzipped.upload_from_string(zipdict[os.path.basename(name)])
 
 
 
@@ -98,10 +101,16 @@ def main():
     
     # fetch Copernicus EMSR codes from Copernicus EMS activations page
     # pandas DataFrame of activations table
-    table_activations_ems = activations.table_floods_ems(event_start_date="2015-07-01")
-    
+    #table_activations_ems = activations.table_floods_ems(event_start_date="2015-07-01")
+    csv_file = "gs://ml4cc_data_lake/0_DEV/0_Raw/WorldFloods/copernicus_ems/copernicus_ems_codes/ems_activations_20150701_20210304.csv"
+    table_activations_ems = pd.read_csv(csv_file, encoding="latin1")
+    table_activations_ems = table_activations_ems.set_index("Code")
     # convert code index to a list
-    emsr_codes = table_activations_ems.index.to_list()
+    # emsr_codes =  table_activations_ems.index.to_list()
+    
+    # post-processing to grab pre-EMSR352 codes
+    table_activations_ems = table_activations_ems[table_activations_ems['has_aoi'] == False]
+    emsr_codes = list(table_activations_ems.index)
 
     # retrieve zipfile urls for each activation EMSR code
     print(f"Generating Copernicus EMSR codes to fetch:")
@@ -110,9 +119,12 @@ def main():
             pbar.set_description("Retrieving EMSR zipfiles to extract...")
             zip_files_activation_url_list = activations.fetch_zip_file_urls(emsr)
             path_to_write_zip_bucket = f"{path_to_write_zip}/{emsr}"
+
             for zip_url in zip_files_activation_url_list:
                 aoi = zip_url.split('_')[1]
+
                 path_to_write_unzip_bucket = f"{path_to_write_unzip}/{emsr}/{aoi}"
+
                 load_ems_zipfiles_to_gcp(zip_url,
                                          bucket_id,
                                          path_to_write_zip_bucket,

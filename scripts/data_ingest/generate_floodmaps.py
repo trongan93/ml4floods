@@ -42,14 +42,16 @@ def main():
     table_activations_ems = pd.read_csv(csv_file, encoding="latin1")
     table_activations_ems = table_activations_ems.set_index("Code")
     
+    table_activations_ems = table_activations_ems[table_activations_ems['has_aoi'] == False]
     esmr_codes = list(table_activations_ems.index)
+    #esmr_codes = ['EMSR280']
     
     unzipped_activations_parent_dir = "gs://ml4cc_data_lake/0_DEV/0_Raw/WorldFloods/copernicus_ems/copernicus_ems_unzip"
     data_store = "1_Staging"
     gcp_output_parent_dir = f"gs://ml4cc_data_lake/0_DEV/{data_store}/WorldFloods/"
 
     # ===== Generate and store registers per code ===========
-    with tqdm(esmr_codes[76:]) as pbar:
+    with tqdm(esmr_codes[2:]) as pbar:
         for activation in pbar:
             code_date = table_activations_ems.loc[activation]["CodeDate"]
             sample_activation_dir = os.path.join(unzipped_activations_parent_dir, activation)

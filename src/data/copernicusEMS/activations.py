@@ -478,7 +478,9 @@ def filter_register_copernicusems(
     pd_source = load_source_file(source_file)
     if pd_source is None:
         return
-
+    print("hi dad!")
+    print("area_of_interest_file", area_of_interest_file)
+    
     product_name = os.path.basename(os.path.dirname(source_file))
     ems_code = product_name.split("_")[0]
 
@@ -883,7 +885,6 @@ def filter_register_copernicusems_gcp_no_aoi(
 
     """
     #   sample path: gs://ml4cc_data_lake/0_DEV/0_Raw/WorldFloods/copernicus_ems/copernicus_ems_unzip/EMSR340/09UNTERGREUTH
-
     aoi_files = get_files_in_bucket_directory_gs(gs_path=unzipped_directory)
 
     source_files = []
@@ -1066,7 +1067,7 @@ def filter_register_copernicusems_gcp_no_aoi(
             "area_of_interest_polygon": area_of_interest_pol,
             # CopernicusEMS specific fields
             "observed_event_file": os.path.basename(observed_event_file),
-            "area_of_interest_file": "None", # os.path.basename(area_of_interest_file),
+            "area_of_interest_file": os.path.basename(area_of_interest_file),
             "ems_code": ems_code,
             "aoi_code": product_name.split("_")[1],
         }
