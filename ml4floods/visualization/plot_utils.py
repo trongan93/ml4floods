@@ -5,6 +5,7 @@ import rasterio
 from rasterio import plot as rasterioplt
 import rasterio.windows
 from matplotlib import colors
+import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 from typing import Union, Optional, List, Tuple
@@ -14,7 +15,6 @@ from ml4floods.data.worldfloods import configs
 from ml4floods.data import utils
 from matplotlib.patches import Patch
 import geopandas as gpd
-
 COLORS_WORLDFLOODS = np.array(configs.COLORS_WORLDFLOODS)
 
 COLORS_WORLDFLOODS_V1_1 = np.array([[0, 0, 0], # invalid
@@ -239,9 +239,9 @@ def plot_floodmap(floodmap:Union[str, gpd.GeoDataFrame], legend:bool=True,
         else:
             floodmap = gpd.read_file(floodmap)
 
-    floodmap_color = floodmap["class"].apply(lambda x: COLORS_FLOODMAP[x])
+    floodmap_color = floodmap["w_class"].apply(lambda x: COLORS_FLOODMAP[x])
 
-    polygons_plot_boundary = (floodmap["class"] == "area_imaged") | (floodmap["class"] == "area_imaged-pre-flood")
+    polygons_plot_boundary = (floodmap["w_class"] == "area_imaged") | (floodmap["w_class"] == "area_imaged-pre-flood")
 
     if not polygons_plot_boundary.all():
         ax = floodmap[~polygons_plot_boundary].plot(color=floodmap_color[~polygons_plot_boundary], figsize=figsize, ax=ax)
@@ -251,7 +251,7 @@ def plot_floodmap(floodmap:Union[str, gpd.GeoDataFrame], legend:bool=True,
         ax = floodmap[polygons_plot_boundary].boundary.plot(color=floodmap_color[polygons_plot_boundary], ax=ax)
 
     if legend:
-        legend_elements = [Patch(facecolor=COLORS_FLOODMAP[c], label=c) for c in floodmap["class"].unique()]
+        legend_elements = [Patch(facecolor=COLORS_FLOODMAP[c], label=c) for c in floodmap["w_class"].unique()]
         ax.legend(handles=legend_elements)
     return ax
 
@@ -512,3 +512,80 @@ def plot_s2_and_confusions(input: Union[str, np.ndarray], positives: np.ndarray 
     cmap = colors.ListedColormap(cmap_colors)
     
     return rasterioplt.show(np.moveaxis(image,-1,0), cmap = cmap, transform = transform, title = title, **kwargs)
+
+def plot_permanent(permanent: Union[str, np.ndarray], transform:Optional[rasterio.Affine]=None, channel_configuration = 'all', legend=True, cmap = "Greys", **kwargs):
+    """
+    This function plot the permanent water areas only
+    Optimize by Andrew Bui (trongan93@mail.ntust.edu.tw)
+    Args:
+        permanent
+    """
+
+    
+    permanent, _ = get_image_transform(permanent, transform=transform)
+    new_permanent = np.squeeze(permanent)
+    rgb_new_permanent = np.zeros((new_permanent.shape[0], new_permanent.shape[1], 3), dtype=np.uint8)
+    # Make True pixels blue
+    rgb_new_permanent[new_permanent>0] = [0,0,255]
+    # Make False pixels while
+    rgb_new_permanent[new_permanent<=0] = [255,255,255]
+
+    ax = plt.imshow(rgb_new_permanent)
+
+    return ax
+
+def plot_gt_v1_wateronly(target: Union[str, np.ndarray], permanent: Optional[Union[str, np.ndarray]]=None,
+                              transform:Optional[rasterio.Affine]=None,
+                              window:Optional[rasterio.windows.Window]=None, legend=True,
+                              size_read:Optional[int]=None,
+                              **kwargs):
+    bands = [0]
+    target, transform = get_image_transform(target, transform=transform, bands=bands, window=window,
+                                            size_read=size_read)
+    target= target[0]
+    # print('plot_gt_v1_wateronly')
+    # print(target.shape)
+
+    rgb_new = np.zeros((target.shape[0], target.shape[1], 3), dtype=np.uint8)
+    # print("number pixel == 2: ", np.count_nonzero(target==2))
+
+    # Make True pixels blue
+    rgb_new[target==2] = [0,0,255]
+    # Make False pixels while
+    rgb_new[target!=2] = [255,255,255]
+    ax = plt.imshow(rgb_new)
+
+    return ax
+        
+def plot_flood(target: Union[str, np.ndarray], permanent: Optional[Union[str, np.ndarray]]=None,
+                              transform:Optional[rasterio.Affine]=None,
+                              window:Optional[rasterio.windows.Window]=None, legend=True,
+                              size_read:Optional[int]=None,
+                              **kwargs):
+    bands = [0]
+    target, transform = get_image_transform(target, transform=transform, bands=bands, window=window,
+                                            size_read=size_read)
+    target= target[0]
+
+    permanent, _ = get_image_transform(permanent, transform=transform)
+    new_permanent = np.squeeze(permanent)
+    
+    print('target shape: ', target.shape)
+    print('target count: ', np.count_nonzero(target==2))
+    print('permanent shape: ', new_permanent.shape)
+    print('permanent count: ', np.count_nonzero(new_permanent>0))
+
+    # flood_map = np.bitwise_xor((new_permanent>0),(target==2))
+    flood_map = np.bitwise_and(np.bitwise_not((new_permanent>0)),(target==2))
+
+    print('flood_map count: ', np.count_nonzero(flood_map))
+
+    new_img = np.zeros((flood_map.shape[0], flood_map.shape[1], 3), dtype=np.uint8)
+
+    # Make True pixels red
+    new_img[flood_map] = [255,0,0]
+    # Make False pixels while
+    new_img[np.bitwise_not(flood_map)] = [255,255,255]
+
+    ax = plt.imshow(new_img)
+    return ax
