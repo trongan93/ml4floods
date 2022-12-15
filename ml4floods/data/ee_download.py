@@ -24,13 +24,6 @@ BANDS_NAMES = {
 }
 
 
-def permanent_water_image(year, bounds=None):
-    # permananet water files are only available pre-2021
-    if year >= 2020:
-        year = 2020
-    return ee.Image(f"JRC/GSW1_4/YearlyHistory/{year}")
-
-
 def _get_collection(collection_name, date_start, date_end, bounds):
     collection = ee.ImageCollection(collection_name)
     collection_filtered = collection.filterDate(date_start, date_end) \
@@ -39,6 +32,18 @@ def _get_collection(collection_name, date_start, date_end, bounds):
     n_images = int(collection_filtered.size().getInfo())
 
     return collection_filtered, n_images
+
+    # add cloud probability
+def add_cloud_prob_landsat(img:ee.Image) -> ee.Image:
+    bqa = img.select(["QA_PIXEL"], ["probability"])
+    clouds = bqa.bitwise_and(int("0000000000001000",2)).gt(0).multiply(100).toUint16()
+
+    # Store images in S2 range
+    img_radiances = img.select(BANDS_NAMES["Landsat"][:-1]).multiply(10_000).toUint16()
+    img_return = img_radiances.addBands(img.select("QA_PIXEL")).addBands(clouds)
+    img_return = img_return.copyProperties(img)
+    img_return = img_return.set("system:time_start", img.get("system:time_start"))
+    return img_return
 
 def get_landsat_collection(date_start:datetime, date_end:datetime,
                            bounds:ee.Geometry,
@@ -70,19 +75,7 @@ def get_landsat_collection(date_start:datetime, date_end:datetime,
             print(f"Not images found for collection LANDSAT/LC08/C02/T1_RT_TOA and LANDSAT/LC09/C02/T1_TOA date start: {date_start} date end: {date_end}")
         return
 
-    # add cloud probability
-    def add_cloud_prob(img:ee.Image) -> ee.Image:
-        bqa = img.select(["QA_PIXEL"], ["probability"])
-        clouds = bqa.bitwise_and(int("0000000000001000",2)).gt(0).multiply(100).toUint16()
-
-        # Store images in S2 range
-        img_radiances = img.select(BANDS_NAMES["Landsat"][:-1]).multiply(10_000).toUint16()
-        img_return = img_radiances.addBands(img.select("QA_PIXEL")).addBands(clouds)
-        img_return = img_return.copyProperties(img)
-        img_return = img_return.set("system:time_start", img.get("system:time_start"))
-        return img_return
-
-    l89 = l89.map(add_cloud_prob)
+    l89 = l89.map(add_cloud_prob_landsat)
 
     daily_mosaic = collection_mosaic_day(l89, bounds)
     # fun_before_mosaic=lambda img: img.toFloat().resample("bicubic")) # Bicubic resampling for 60m res bands?
@@ -288,7 +281,7 @@ def img_collection_to_feature_collection(img_col:ee.ImageCollection,
     return feature_collection
 
 
-def _istaskrunning(description:str) -> bool:
+def istaskrunning(description:str) -> bool:
     task_list = ee.data.getTaskList()
     for t in task_list:
         if t["description"] == description:
@@ -325,7 +318,7 @@ def mayberun(filename, desc, function, export_task, overwrite=False, dry_run=Fal
                     print(f"\tFile {filename} exists , it will not be downloaded")
                 return
 
-    if not dry_run and _istaskrunning(desc):
+    if not dry_run and istaskrunning(desc):
         if verbose >= 2:
             print("\ttask %s already running!" % desc)
         return
@@ -449,15 +442,20 @@ def download_permanent_water(area_of_interest: Polygon, date_search:datetime,
     bounding_box_aoi = area_of_interest.bounds
     bounding_box_pol = ee.Geometry.Polygon(generate_polygon(bounding_box_aoi))
 
-    img_export = permanent_water_image(date_search.year, pol)
+    if date_search.year >= 2021:
+        year = 2021
+    else:
+        year = date_search.year
+
+    img_export = ee.Image(f"JRC/GSW1_4/YearlyHistory/{year}")
 
     if name_task is None:
         name_for_desc = os.path.basename(path_no_bucket_name)
     else:
         name_for_desc = name_task
 
-    filename = os.path.join(path_no_bucket_name, f"{date_search.year}")
-    desc = f"{name_for_desc}_{date_search.year}"
+    filename = os.path.join(path_no_bucket_name, f"{year}")
+    desc = f"{name_for_desc}_{year}"
 
     export_task_fun_img = export_task_image(
         bucket=bucket_name,
